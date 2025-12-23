@@ -107,13 +107,6 @@ def arbitrage_cycle():
     markets = get_markets()
     logger.info(f"Scanning {len(markets)} markets")
 
-    usdc_balance = get_usdc_balance()
-    max_size = min(MAX_POSITION_USDC, usdc_balance / 2)
-
-    if max_size < 1:
-        logger.warning("Insufficient USDC balance")
-        return
-
     for market in markets:
         pair = get_binary_assets(market)
         if not pair:
