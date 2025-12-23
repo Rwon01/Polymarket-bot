@@ -17,7 +17,7 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 RPC_URL = os.getenv("RPC_URL", "https://polygon-rpc.com")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "137"))
 
-# Fee-adjusted, conservative
+# Fee-adjusted arbitrage threshold
 ENTRY_THRESHOLD = float(os.getenv("ENTRY_THRESHOLD", "0.95"))
 MAX_POSITION_USDC = float(os.getenv("MAX_POSITION_USDC", "20"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))
@@ -52,6 +52,7 @@ logger.addHandler(file_handler)
 # =====================
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
 client = ClobClient(
     host="https://clob.polymarket.com",
     key=PRIVATE_KEY,
@@ -82,9 +83,6 @@ def get_best_ask(token_id):
     if not book.asks:
         return None
     return float(book.asks[0].price)
-
-def get_usdc_balance():
-    return float(client.get_usdc_balance())
 
 def place_ioc_buy(token_id, price, usdc_amount):
     logger.info(
@@ -130,16 +128,14 @@ def arbitrage_cycle():
             )
 
             try:
-                yes_tx = place_ioc_buy(
-                    yes["token_id"], yes_ask, max_size
+                place_ioc_buy(
+                    yes["token_id"], yes_ask, MAX_POSITION_USDC
                 )
-                no_tx = place_ioc_buy(
-                    no["token_id"], no_ask, max_size
+                place_ioc_buy(
+                    no["token_id"], no_ask, MAX_POSITION_USDC
                 )
 
-                logger.info(
-                    f"ARB EXECUTED | YES_TX={yes_tx} | NO_TX={no_tx}"
-                )
+                logger.info("ARB EXECUTED — holding to settlement")
                 return  # one arb at a time
 
             except Exception:
@@ -161,6 +157,7 @@ def main():
             arbitrage_cycle()
         except Exception:
             logger.exception("Fatal error in arbitrage cycle")
+
         time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
