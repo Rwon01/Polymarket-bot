@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Arb Dashboard</title>
+    <meta http-equiv="refresh" content="5">
+    <style>
+        body {
+            background: #111;
+            color: #eee;
+            font-family: monospace;
+            padding: 20px;
+        }
+        .box {
+            border: 1px solid #333;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+        .profit {
+            font-size: 24px;
+            color: #00ff99;
+        }
+        .logs {
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: scroll;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+
+<a href="/logout" style="color:#888;">Logout</a>
+
+<h1>📈 Polymarket Arb Dashboard</h1>
+
+<div class="box">
+    <strong>Total Estimated Profit:</strong>
+    <div class="profit">${{ profit }}</div>
+</div>
+
+<div class="box">
+    <strong>Recent Trades</strong>
+    <ul>
+        {% for t in trades %}
+            <li>{{ t }}</li>
+        {% endfor %}
+    </ul>
+</div>
+
+<div class="box">
+    <strong>Logs</strong>
+    <div class="logs">
+        {% for line in logs %}
+            {{ line }}
+        {% endfor %}
+    </div>
+</div>
+
+</body>
+</html>
