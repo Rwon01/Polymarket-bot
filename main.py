@@ -17,8 +17,8 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 RPC_URL = os.getenv("RPC_URL", "https://polygon-rpc.com")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "137"))
 
-ENTRY_THRESHOLD = float(os.getenv("ENTRY_THRESHOLD", "0.97"))
-EXIT_THRESHOLD = float(os.getenv("EXIT_THRESHOLD", "0.995"))
+# Fee-adjusted, conservative
+ENTRY_THRESHOLD = float(os.getenv("ENTRY_THRESHOLD", "0.95"))
 MAX_POSITION_USDC = float(os.getenv("MAX_POSITION_USDC", "20"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))
 
@@ -33,16 +33,14 @@ logger.setLevel(logging.INFO)
 
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
+    "%Y-%m-%d %H:%M:%S"
 )
 
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 
 file_handler = RotatingFileHandler(
-    LOG_FILE,
-    maxBytes=5_000_000,
-    backupCount=3
+    LOG_FILE, maxBytes=5_000_000, backupCount=3
 )
 file_handler.setFormatter(formatter)
 
@@ -79,30 +77,42 @@ def get_binary_assets(market):
         return None
     return assets[0], assets[1]
 
-def get_mid_price(token_id):
+def get_best_ask(token_id):
     book = client.get_order_book(token_id)
-    if not book.bids or not book.asks:
+    if not book.asks:
         return None
-    bid = float(book.bids[0].price)
-    ask = float(book.asks[0].price)
-    return (bid + ask) / 2
+    return float(book.asks[0].price)
 
-def place_market_buy(token_id, usdc_amount):
-    logger.info(f"Placing BUY | token={token_id} | amount=${usdc_amount}")
-    tx = client.create_market_order(
-        token_id=token_id,
-        amount=usdc_amount,
-        side="buy"
+def get_usdc_balance():
+    return float(client.get_usdc_balance())
+
+def place_ioc_buy(token_id, price, usdc_amount):
+    logger.info(
+        f"IOC BUY | token={token_id} | price={price:.4f} | size=${usdc_amount}"
     )
-    logger.info(f"Order submitted | token={token_id} | tx={tx}")
+    return client.create_order(
+        token_id=token_id,
+        price=price,
+        size=usdc_amount,
+        side="buy",
+        order_type="limit",
+        time_in_force="IOC"
+    )
 
 # =====================
-# CORE LOGIC
+# CORE ARBITRAGE LOGIC
 # =====================
 
 def arbitrage_cycle():
     markets = get_markets()
     logger.info(f"Scanning {len(markets)} markets")
+
+    usdc_balance = get_usdc_balance()
+    max_size = min(MAX_POSITION_USDC, usdc_balance / 2)
+
+    if max_size < 1:
+        logger.warning("Insufficient USDC balance")
+        return
 
     for market in markets:
         pair = get_binary_assets(market)
@@ -110,27 +120,38 @@ def arbitrage_cycle():
             continue
 
         yes, no = pair
-        yes_price = get_mid_price(yes["token_id"])
-        no_price = get_mid_price(no["token_id"])
 
-        if yes_price is None or no_price is None:
+        yes_ask = get_best_ask(yes["token_id"])
+        no_ask = get_best_ask(no["token_id"])
+
+        if yes_ask is None or no_ask is None:
             continue
 
-        price_sum = yes_price + no_price
+        price_sum = yes_ask + no_ask
 
         if price_sum <= ENTRY_THRESHOLD:
             logger.info(
                 f"ARB FOUND | {market.get('slug')} | "
-                f"YES={yes_price:.4f} NO={no_price:.4f} "
+                f"YES={yes_ask:.4f} NO={no_ask:.4f} "
                 f"SUM={price_sum:.4f}"
             )
 
-            size = MAX_POSITION_USDC
-            place_market_buy(yes["token_id"], size)
-            place_market_buy(no["token_id"], size)
+            try:
+                yes_tx = place_ioc_buy(
+                    yes["token_id"], yes_ask, max_size
+                )
+                no_tx = place_ioc_buy(
+                    no["token_id"], no_ask, max_size
+                )
 
-            logger.info("Arbitrage position opened — pausing further entries")
-            return  # one position at a time
+                logger.info(
+                    f"ARB EXECUTED | YES_TX={yes_tx} | NO_TX={no_tx}"
+                )
+                return  # one arb at a time
+
+            except Exception:
+                logger.exception("Arbitrage execution failed")
+                return
 
 # =====================
 # MAIN LOOP
@@ -139,7 +160,6 @@ def arbitrage_cycle():
 def main():
     logger.info("=== Polymarket Arbitrage Bot Started ===")
     logger.info(f"ENTRY_THRESHOLD={ENTRY_THRESHOLD}")
-    logger.info(f"EXIT_THRESHOLD={EXIT_THRESHOLD}")
     logger.info(f"MAX_POSITION_USDC={MAX_POSITION_USDC}")
     logger.info(f"POLL_INTERVAL={POLL_INTERVAL}s")
 
@@ -147,7 +167,7 @@ def main():
         try:
             arbitrage_cycle()
         except Exception:
-            logger.exception("Error during arbitrage cycle")
+            logger.exception("Fatal error in arbitrage cycle")
         time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
